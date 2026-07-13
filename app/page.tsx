@@ -102,6 +102,9 @@ export default function Home() {
   const [error, setError] = useState("");
   const [leads, setLeads] = useState<Lead[]>(demoLeads);
   const [activeStatus, setActiveStatus] = useState<SiteStatus | "all">("all");
+  const [selectedLeadId, setSelectedLeadId] = useState<string>("");
+  const [generatedPrompt, setGeneratedPrompt] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => activeStatus === "all" || lead.status === activeStatus);
@@ -111,6 +114,7 @@ export default function Home() {
   const averageScore = opportunityCount
     ? Math.round(leads.filter((lead) => lead.status !== "official").reduce((sum, lead) => sum + lead.score, 0) / opportunityCount)
     : 0;
+  const selectedLead = leads.find((lead) => lead.id === selectedLeadId);
 
   async function handleSearch(event: FormEvent) {
     event.preventDefault();
@@ -155,6 +159,8 @@ export default function Home() {
       setLeads(nextLeads);
       setDemo(false);
       setActiveStatus("all");
+      setSelectedLeadId("");
+      setGeneratedPrompt("");
       if (!nextLeads.length) setError("条件に一致する店舗がありませんでした。口コミ数を下げてお試しください。");
     } catch (searchError) {
       setError(searchError instanceof Error ? `${searchError.message} API設定とドメイン制限をご確認ください。` : "検索に失敗しました。");
@@ -168,6 +174,95 @@ export default function Home() {
     setDemo(true);
     setError("");
     setActiveStatus("all");
+    setSelectedLeadId("");
+    setGeneratedPrompt("");
+  }
+
+  function selectLead(id: string) {
+    setSelectedLeadId(id);
+    setGeneratedPrompt("");
+    setCopied(false);
+  }
+
+  function createWebsitePrompt(leadOverride?: Lead) {
+    const targetLead = leadOverride ?? selectedLead;
+    if (!targetLead) return;
+    const websiteInfo = targetLead.website
+      ? `${statusMeta[targetLead.status].label}（${targetLead.website}）`
+      : statusMeta[targetLead.status].label;
+    const prompt = `あなたは、地域店舗の魅力を引き出すシニアWebデザイナー兼コピーライターです。以下の店舗について公開情報を追加リサーチし、集客と信頼獲得につながる完成度の高いホームページを作成してください。
+
+【対象店舗】
+店舗名：${targetLead.name}
+住所：${targetLead.address}
+Google評価：${targetLead.rating.toFixed(1)}
+口コミ数：${targetLead.reviews.toLocaleString()}件
+現在のWeb状況：${websiteInfo}
+Googleマップ：${targetLead.mapsUrl ?? "店舗名と住所から確認してください"}
+
+【リサーチ】
+- Googleマップ、公式SNS、信頼できる公開情報から、営業時間、定休日、電話番号、アクセス、商品・サービス、価格帯、店の歴史、こだわり、口コミ傾向を調査する
+- 情報源を照合し、確認できない内容は捏造しない。「要確認」と明示する
+- 写真は同じ画像を繰り返さず、店舗・商品・職人・空間・外観など役割の異なる実写画像を使う。利用権限を確認できない画像は仮画像として明示する
+
+【サイト構成】
+1. 店名の直後に、店舗の魅力が一目で伝わるアイキャッチ画像と短いメッセージ
+2. 店舗の物語、ポリシー、選ばれる理由
+3. 主力商品またはサービス
+4. 口コミから読み取れる支持される理由
+5. 営業時間、住所、アクセス、Googleマップへの導線
+6. 電話、予約、問い合わせ、SNSなど最適な行動ボタン
+
+【デザイン要件】
+- 店舗の業種と雰囲気に合った独自デザインにし、テンプレート的・AI生成的な見た目を避ける
+- 写真を主役にし、文字オーバーレイは写真の一部だけに小さく配置する
+- 安っぽい大きな角丸ボタン、過剰なグラデーション、意味のない装飾を避ける
+- スマートフォンを最優先し、PC・タブレットにも対応する
+- 控えめで自然なスクロールアニメーションを加える
+- 読みやすさ、キーボード操作、コントラスト、代替テキストに配慮する
+
+【実装と確認】
+- この店舗専用のコピーとデザインで、実際に動作するサイトを実装する
+- ローカルブラウザでPC幅とスマホ幅を確認し、重なり、はみ出し、広すぎる余白を修正する
+- 最後に、確認できた事実、要確認事項、使用画像の出典または仮画像の区別を簡潔にまとめる`;
+    setGeneratedPrompt(prompt);
+    setCopied(false);
+    window.setTimeout(() => document.getElementById("generated-prompt")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function copyPrompt() {
+    if (!generatedPrompt) return;
+    const legacyCopy = () => {
+      const temporary = document.createElement("textarea");
+      temporary.value = generatedPrompt;
+      temporary.setAttribute("readonly", "");
+      temporary.style.position = "fixed";
+      temporary.style.opacity = "0";
+      document.body.appendChild(temporary);
+      temporary.select();
+      document.execCommand("copy");
+      temporary.remove();
+    };
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(generatedPrompt).catch(legacyCopy);
+    } else {
+      legacyCopy();
+    }
+  }
+
+  function openCodex() {
+    if (!generatedPrompt) return;
+    const deepLink = `codex://threads/new?prompt=${encodeURIComponent(generatedPrompt)}`;
+    const fallbackTimer = window.setTimeout(() => {
+      if (document.visibilityState === "visible") window.location.href = "https://chatgpt.com/download/";
+    }, 1800);
+    const cancelFallback = () => {
+      if (document.visibilityState === "hidden") window.clearTimeout(fallbackTimer);
+    };
+    document.addEventListener("visibilitychange", cancelFallback, { once: true });
+    window.location.href = deepLink;
   }
 
   return (
@@ -229,28 +324,54 @@ export default function Home() {
           <span>チャンス度順</span>
         </div>
 
+        <div className={`selectionBar ${selectedLead ? "hasSelection" : ""}`}>
+          <div><span>{selectedLead ? "選択中" : "店舗を1件選択"}</span><strong>{selectedLead ? selectedLead.name : "ホームページを作る店舗を選んでください"}</strong></div>
+          <button type="button" onClick={() => createWebsitePrompt()} disabled={!selectedLead}>ホームページ作成用<br />プロンプトを生成 <b>↗</b></button>
+        </div>
+
         {error && <div className="errorMessage">{error}</div>}
 
         <div className="leadTable">
-          <div className="tableHead"><span>店舗</span><span>Google評価</span><span>Webサイト</span><span>チャンス度</span><span /></div>
+          <div className="tableHead"><span>選択</span><span>店舗</span><span>Google評価</span><span>Webサイト</span><span>チャンス度</span><span /></div>
           {filteredLeads.map((lead, index) => (
-            <article className="leadRow" key={lead.id}>
+            <article className={`leadRow ${selectedLeadId === lead.id ? "selected" : ""}`} key={lead.id}>
+              <label className="selectControl" aria-label={`${lead.name}を選択`}><input type="radio" name="selected-store" checked={selectedLeadId === lead.id} onChange={() => selectLead(lead.id)} /><span /></label>
               <div className="storeCell"><span className="rank">{String(index + 1).padStart(2, "0")}</span><div><h2>{lead.name}</h2><p>{lead.address}</p></div></div>
               <div className="ratingCell"><strong>★ {lead.rating.toFixed(1)}</strong><span>{lead.reviews.toLocaleString()}件</span></div>
               <div><span className={`statusBadge ${lead.status}`}><i />{statusMeta[lead.status].label}</span></div>
               <div className="scoreCell"><div><i style={{ width: `${lead.score}%` }} /></div><strong>{lead.score}</strong></div>
               <div className="rowActions">
                 {lead.mapsUrl ? <a href={lead.mapsUrl} target="_blank" rel="noreferrer" aria-label={`${lead.name}をGoogleマップで見る`}>地図 ↗</a> : <button type="button" onClick={() => alert("デモデータのため地図リンクはありません。")}>地図 ↗</button>}
-                {lead.status !== "official" && <button className="proposal" type="button" onClick={() => alert(`${lead.name}向けの提案準備機能は次のバージョンで追加予定です。`)}>提案準備</button>}
+                {lead.status !== "official" && <button className="proposal" type="button" onClick={() => { selectLead(lead.id); createWebsitePrompt(lead); }}>この店舗で作る</button>}
               </div>
             </article>
           ))}
           {!filteredLeads.length && !error && <div className="emptyState">この条件に該当する店舗はありません。</div>}
         </div>
+
+        {generatedPrompt && selectedLead && (
+          <section className="promptBuilder" id="generated-prompt">
+            <div className="promptHeader"><div><span className="stepNumber">03</span><p>作成プロンプト</p></div><p><strong>{selectedLead.name}</strong> 専用</p></div>
+            <div className="promptBody">
+              <div className="promptText">
+                <div><span>生成済みプロンプト</span><button type="button" onClick={copyPrompt}>{copied ? "コピーしました ✓" : "コピー"}</button></div>
+                <textarea readOnly value={generatedPrompt} aria-label="生成されたホームページ作成用プロンプト" />
+              </div>
+              <aside className="codexAction">
+                <p className="overline">NEXT STEP</p>
+                <h2>このまま、<br />サイト制作へ。</h2>
+                <p>生成したプロンプトを入力した状態で、新しいCodexタスクを開きます。</p>
+                <button type="button" onClick={openCodex}>Codexでホームページを作成 <span>↗</span></button>
+                <small>Codexが開かない場合は、公式ダウンロードページへ移動します。</small>
+                <a href="https://chatgpt.com/download/" target="_blank" rel="noreferrer">Codexをダウンロードする</a>
+              </aside>
+            </div>
+          </section>
+        )}
       </section>
 
       <section className="workflow">
-        <div><span className="stepNumber pale">03</span><p>見つけた後の流れ</p></div>
+        <div><span className="stepNumber pale">04</span><p>見つけた後の流れ</p></div>
         <ol>
           <li><span>1</span><div><strong>候補を絞る</strong><p>評価とWeb状況から、提案する価値の高い店舗を選びます。</p></div></li>
           <li><span>2</span><div><strong>お店を深く知る</strong><p>口コミ・SNS・競合から、その店ならではの魅力を整理します。</p></div></li>
